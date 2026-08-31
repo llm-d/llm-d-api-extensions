@@ -1,0 +1,44 @@
+name: CI - Unit Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: vllm
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # `vllm` is a heavyweight GPU oriented dependency and the unit tests only
+      # need a handful of symbols from it (`vllm.logger`, `vllm.tasks`), so
+      # install it on its own rather than pulling the whole project dependency
+      # set through `pip install -e .`.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu vllm
+          pip install fastapi 'pydantic>=2' pytest pytest-asyncio httpx
+
+      # The opt-in e2e tests skip themselves unless RUN_VLLM_E2E is set. They
+      # download model weights and launch a real server which CI does not do.
+      - name: Run unit tests
+        run: pytest tests/ -v

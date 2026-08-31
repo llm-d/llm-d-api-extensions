@@ -1,0 +1,41 @@
+name: Feature Request
+description: Suggest a new extension, endpoint or improvement
+type: feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest an improvement!
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case. What does llm-d need that it cannot get today?
+      placeholder: Routing decisions need X, which is not exposed by any current endpoint
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        If you are proposing an endpoint, sketch the route and an example response.
+        Note whether it needs an engine, and any server flags it would require.
+    validations:
+      required: true
+  - type: dropdown
+    id: server
+    attributes:
+      label: Inference server
+      options:
+        - vLLM
+        - Another server (please describe below)
+        - Not server specific
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including whether this belongs upstream in the inference server instead
