@@ -103,6 +103,7 @@ def test_server_config_endpoint_returns_200_with_valid_schema():
     assert set(data.keys()) == {
         "model",
         "kv_cache",
+        "kv_transfer",
         "scheduler",
         "parallelism",
         "features",
