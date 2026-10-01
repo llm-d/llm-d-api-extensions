@@ -11,7 +11,7 @@ Unlike the unit tests in `test_config_plugin.py`/`test_devices_plugin.py`/
 weights over the network, so it is opt-in:
 
     pip install -e .[test]
-    RUN_VLLM_E2E=1 pytest tests/test_e2e.py -v
+    RUN_VLLM_E2E=1 pytest tests/server_introspection/test_e2e.py -v
 
 It is skipped by default (no `vllm` install, no `RUN_VLLM_E2E`) so `pytest`
 without extra setup only runs the fast unit tests.

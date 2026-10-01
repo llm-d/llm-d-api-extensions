@@ -2,9 +2,9 @@
 
 API extensions for inference servers, packaged for [llm-d](https://github.com/llm-d/llm-d).
 
-llm-d needs data out of the inference server. Information like how it was launched, what hardware it sits on, how big its KV cache turned out to be. Thgis data is then used to make routing and scheduling decisions. Rather than adding those endpoints to an inference server's core, this repo hosts them as **extensions** that are installed alongside the server and loaded through the server's own extension points.
+llm-d needs data out of the inference server. Information like how it was launched, what hardware it sits on, how big its KV cache turned out to be. This data is then used to make routing and scheduling decisions. Rather than adding those endpoints to an inference server's core, this repo hosts them as **extensions** that are installed alongside the server and loaded through the server's own extension points.
 
-For vLLM, that means using the [endpoint plugin framework](https://docs.vllm.ai/en/latest/design/endpoint_plugins/). The framework is an extension mecahmism where a  Python package is registered as a `vllm.endpoint_plugins` entry point and vLLM attaches its routes at startup. No fork, no patch and no core change required on the server.
+For vLLM, that means using the [endpoint plugin framework](https://docs.vllm.ai/en/latest/design/endpoint_plugins/). The framework is an extension mechanism where a Python package is registered as a `vllm.endpoint_plugins` entry point and vLLM attaches its routes at startup. No fork, no patch and no core change required on the server.
 
 ## Layout
 
@@ -36,7 +36,7 @@ Extensions are opt-in. vLLM only loads the plugins named in `VLLM_PLUGINS`, so i
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT. md) for community expectations. Maintainers are listed in [MAINTAINERS.md](MAINTAINERS.md). To report a vulnerability, follow [SECURITY.md](SECURITY.md) rather than opening an issue.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations. Maintainers are listed in [MAINTAINERS.md](MAINTAINERS.md). To report a vulnerability, follow [SECURITY.md](SECURITY.md) rather than opening an issue.
 
 ## License
 

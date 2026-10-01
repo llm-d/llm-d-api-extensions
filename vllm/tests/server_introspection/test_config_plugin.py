@@ -15,6 +15,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from llm_d_api_extensions_vllm.server_introspection.config_plugin import (
+    EXPOSE_EXTRA_CONFIG_ENV,
+    REDACTED,
     ServerConfigPlugin,
     _build_response,
 )
@@ -349,9 +351,33 @@ class TestBuildResponseKVTransferSection:
         assert resp.kv_transfer is not None
         assert resp.kv_transfer.kv_connector == "NixlConnector"
         assert resp.kv_transfer.kv_role == "kv_producer"
-        assert resp.kv_transfer.extra_config == {"backend": "UCX"}
+        assert resp.kv_transfer.extra_config == {"backend": REDACTED}
         assert resp.kv_transfer.nixl_side_channel_host == "10.0.0.5"
         assert resp.kv_transfer.nixl_side_channel_port == 5600
+
+    def test_extra_config_values_redacted_by_default(self, monkeypatch):
+        monkeypatch.delenv(EXPOSE_EXTRA_CONFIG_ENV, raising=False)
+        kv_transfer_cfg = _make_kv_transfer_config(
+            kv_connector_extra_config={"api_key": "s3cret", "backend": "UCX"},
+        )
+        cfg = _make_vllm_config(kv_transfer_config=kv_transfer_cfg)
+        resp = _build_response(cfg, ["m"])
+        assert resp.kv_transfer.extra_config == {"api_key": REDACTED, "backend": REDACTED}
+
+    def test_extra_config_values_exposed_when_opted_in(self, monkeypatch):
+        monkeypatch.setenv(EXPOSE_EXTRA_CONFIG_ENV, "1")
+        kv_transfer_cfg = _make_kv_transfer_config(
+            kv_connector_extra_config={"api_key": "s3cret", "backend": "UCX"},
+        )
+        cfg = _make_vllm_config(kv_transfer_config=kv_transfer_cfg)
+        resp = _build_response(cfg, ["m"])
+        assert resp.kv_transfer.extra_config == {"api_key": "s3cret", "backend": "UCX"}
+
+    def test_empty_extra_config_stays_empty(self, monkeypatch):
+        monkeypatch.delenv(EXPOSE_EXTRA_CONFIG_ENV, raising=False)
+        cfg = _make_vllm_config(kv_transfer_config=_make_kv_transfer_config())
+        resp = _build_response(cfg, ["m"])
+        assert resp.kv_transfer.extra_config == {}
 
     def test_non_nixl_connector_leaves_nixl_fields_none(self):
         kv_transfer_cfg = _make_kv_transfer_config(kv_connector="LMCacheConnectorV1")
@@ -447,14 +473,17 @@ class TestGetServerConfigEndpoint:
         assert resp.status_code == 500
 
     def test_response_cached_at_init_state_not_rebuilt_per_request(self):
-        cfg = _make_vllm_config()
+        cfg = _make_vllm_config(max_model_len=32768)
         app = _make_test_app(cfg, served_model_name=["m"])
+        cached = app.state.server_config_response
         with TestClient(app) as client:
-            client.get("/plugins/llm-d-server-introspection/config")
-            client.get("/plugins/llm-d-server-introspection/config")
-        # model_config is only read once during init_state.
-        assert cfg.model_config.max_model_len == cfg.model_config.max_model_len
-        assert app.state.server_config_response is app.state.server_config_response
+            first = client.get("/plugins/llm-d-server-introspection/config")
+            # A rebuild per request would pick up this change.
+            cfg.model_config.max_model_len = 1024
+            second = client.get("/plugins/llm-d-server-introspection/config")
+        assert first.json()["model"]["max_model_len"] == 32768
+        assert second.json()["model"]["max_model_len"] == 32768
+        assert app.state.server_config_response is cached
 
     def test_engine_client_none_on_render_server_is_fine(self):
         # required_tasks=None -> eligible on the CPU only render server,

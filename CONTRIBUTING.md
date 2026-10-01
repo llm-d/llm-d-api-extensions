@@ -62,7 +62,7 @@ New endpoints should:
 
 ## Code review
 
-Pull requests are reviewed by the maintainers listed in [OWNERS](OWNERS). Reviews arr done on a best effort basis. Maintainers may prioritise their own work. Addressing review feedback promptly is the fastest path to a merge.
+Pull requests are reviewed by the maintainers listed in [OWNERS](OWNERS). Reviews are done on a best effort basis. Maintainers may prioritise their own work. Addressing review feedback promptly is the fastest path to a merge.
 
 ## Community
 

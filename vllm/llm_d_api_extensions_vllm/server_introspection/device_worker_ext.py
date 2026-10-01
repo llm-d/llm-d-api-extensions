@@ -23,6 +23,10 @@ from vllm.logger import init_logger
 # logger has no handler anywhere and silently drops every message.
 logger = init_logger(f"vllm.{__name__}")
 
+# Worker method name the `devices` plugin calls over `collective_rpc`. Shared
+# so a rename breaks at import time rather than at RPC dispatch.
+GET_DEVICE_PROPERTIES = "get_device_properties"
+
 
 def _safe(fn: Any, *args: Any) -> Any:
     # Some platforms (e.g. CPU) don't implement every `current_platform`

@@ -63,11 +63,11 @@ Operator supplied, config time values of how the server was launched. Nothing pr
 > `kv_transfer` is `null` when no disaggregation/KV offloading connector is configured (`vllm_config.kv_transfer_config` is `None`). `nixl_side_channel_host`/`nixl_side_channel_port` are only populated when `kv_connector` is `"NixlConnector"`. They report the env derived *base* host/port (`VLLM_NIXL_SIDE_CHANNEL_HOST`/`VLLM_NIXL_SIDE_CHANNEL_PORT`). `NixlConnector` derives the actual per rank bound port as `base_port + rank_offset` inside the worker.
 
 > [!WARNING]
-> `kv_connector_extra_config` is free form and operator controlled. It could theoretically contain sensitive data.
+> `kv_connector_extra_config` is free form and operator controlled, so it may contain sensitive data. `extra_config` therefore reports its keys with every value replaced by `"<redacted>"`. Set `LLM_D_INTROSPECTION_EXPOSE_KV_EXTRA_CONFIG=1` in the server's environment to return the values verbatim.
 
 ### `GET /plugins/llm-d-server-introspection/devices`
 
-Per rank hardware properties, gathered once at startup via `collective_rpc` and cached for the server's lifetime. Requires an engine (`503` on the CPU only render server) and the worker side `get_device_properties` method installed by `device_worker_ext.DeviceInfoWorkerExtension` via `--worker-extension-cls`.
+Per rank hardware properties, gathered once at startup via `collective_rpc` and cached for the server's lifetime. Requires an engine (`503` on the CPU only render server) and the worker side `get_device_properties` method installed by `device_worker_ext.DeviceInfoWorkerExtension` via `--worker-extension-cls`. Without the worker extension, the server still starts and this endpoint returns `503`.
 
 ```jsonc
 {

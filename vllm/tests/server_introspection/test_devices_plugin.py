@@ -13,6 +13,10 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from llm_d_api_extensions_vllm.server_introspection.device_worker_ext import (
+    GET_DEVICE_PROPERTIES,
+    DeviceInfoWorkerExtension,
+)
 from llm_d_api_extensions_vllm.server_introspection.devices_plugin import (
     ServerDevicesPlugin,
     _build_response,
@@ -55,12 +59,15 @@ _NO_CAPABILITY_ENTRY = {
 class _FakeEngineClient:
     """Minimal stand in exercising `collective_rpc`. Not a real engine."""
 
-    def __init__(self, rpc_result: Any = None):
+    def __init__(self, rpc_result: Any = None, rpc_error: Exception | None = None):
         self.rpc_result = rpc_result
+        self.rpc_error = rpc_error
         self.rpc_calls: list[tuple[str, tuple, dict]] = []
 
     async def collective_rpc(self, method, timeout=None, args=(), kwargs=None):
         self.rpc_calls.append((method, args, kwargs or {}))
+        if self.rpc_error is not None:
+            raise self.rpc_error
         return self.rpc_result
 
 
@@ -158,6 +165,18 @@ class TestGetDevicesEndpoint:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/plugins/llm-d-server-introspection/devices")
         assert resp.status_code == 503
+        assert "requires an engine" in resp.json()["detail"]
+
+    def test_missing_worker_extension_does_not_crash_init_and_returns_503(self):
+        # vLLM raises from collective_rpc when no worker has the method.
+        fake_client = _FakeEngineClient(
+            rpc_error=AttributeError("'Worker' object has no attribute 'get_device_properties'")
+        )
+        app = _make_test_app(fake_client)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/devices")
+        assert resp.status_code == 503
+        assert "--worker-extension-cls" in resp.json()["detail"]
 
     def test_missing_state_returns_500(self):
         # attach_router without ever calling init_state.
@@ -202,6 +221,16 @@ class TestGetDevicesEndpoint:
 # ---------------------------------------------------------------------------
 # Plugin metadata
 # ---------------------------------------------------------------------------
+
+
+class TestRpcMethodName:
+    def test_worker_extension_defines_rpc_method(self):
+        assert callable(getattr(DeviceInfoWorkerExtension, GET_DEVICE_PROPERTIES, None))
+
+    def test_plugin_calls_shared_rpc_method_name(self):
+        fake_client = _FakeEngineClient(rpc_result=[])
+        _make_test_app(fake_client)
+        assert fake_client.rpc_calls[0][0] == GET_DEVICE_PROPERTIES
 
 
 class TestPluginMetadata:

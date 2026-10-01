@@ -9,6 +9,7 @@ eligible on the CPU only render server (`init_state` receives
 `engine_client=None` there which is fine since it is never touched).
 """
 
+import os
 from argparse import Namespace
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,19 @@ if TYPE_CHECKING:
 # handler to the "vllm" logger tree (propagate=False), so a bare __name__
 # logger has no handler anywhere and silently drops messages.
 logger = init_logger(f"vllm.{__name__}")
+
+
+# `kv_connector_extra_config` is free form and operator controlled, so it may
+# hold credentials. Values are redacted (keys kept) unless this env var is "1".
+EXPOSE_EXTRA_CONFIG_ENV = "LLM_D_INTROSPECTION_EXPOSE_KV_EXTRA_CONFIG"
+REDACTED = "<redacted>"
+
+
+def _redact_extra_config(extra_config: dict | None) -> dict:
+    extra_config = extra_config or {}
+    if os.environ.get(EXPOSE_EXTRA_CONFIG_ENV) == "1":
+        return dict(extra_config)
+    return {key: REDACTED for key in extra_config}
 
 
 def _dtype_str(dtype: object) -> str:
@@ -69,7 +83,7 @@ def _build_kv_transfer_info(vllm_config: "VllmConfig") -> KVTransferInfo | None:
         kv_parallel_size=kv_transfer_cfg.kv_parallel_size,
         kv_rank=kv_transfer_cfg.kv_rank,
         engine_id=kv_transfer_cfg.engine_id,
-        extra_config=kv_transfer_cfg.kv_connector_extra_config,
+        extra_config=_redact_extra_config(kv_transfer_cfg.kv_connector_extra_config),
         nixl_side_channel_host=nixl_host,
         nixl_side_channel_port=nixl_port,
     )
