@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from starlette.datastructures import State
-from vllm.logger import init_logger
 
+from .common import get_logger
 from .schemas import (
     FeaturesInfo,
     KVCacheInfo,
@@ -31,10 +31,7 @@ if TYPE_CHECKING:
     from vllm.config import VllmConfig
     from vllm.engine.protocol import EngineClient
 
-# "vllm." prefix required. vLLM's default logging config only attaches a
-# handler to the "vllm" logger tree (propagate=False), so a bare __name__
-# logger has no handler anywhere and silently drops messages.
-logger = init_logger(f"vllm.{__name__}")
+logger = get_logger(__name__)
 
 
 # `kv_connector_extra_config` is free form and operator controlled, so it may

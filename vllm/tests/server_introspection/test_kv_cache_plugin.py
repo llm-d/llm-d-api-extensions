@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from kv_group_fixtures import ALL_KINDS, BASE_GROUP, SPEC_CLS_BY_KIND, group_dict
 
 from llm_d_api_extensions_vllm.server_introspection.kv_cache_plugin import (
     ServerKVCachePlugin,
@@ -22,170 +23,22 @@ from llm_d_api_extensions_vllm.server_introspection.kv_cache_plugin import (
     _capacity_from_vllm_config,
 )
 from llm_d_api_extensions_vllm.server_introspection.schemas import (
-    ChunkedLocalAttentionGroupSpec,
-    CrossAttentionGroupSpec,
-    EncoderOnlyAttentionGroupSpec,
     FullAttentionGroupSpec,
     KVCacheResponse,
     MambaGroupSpec,
-    MLAAttentionGroupSpec,
-    SinkFullAttentionGroupSpec,
-    SlidingWindowGroupSpec,
-    SlidingWindowMLAGroupSpec,
-    UnknownGroupSpec,
 )
 
 # ---------------------------------------------------------------------------
-# Helpers — serialized group dicts (mirrors what
-# `get_kv_cache_group_metadata` produces per vllm-project/vllm#48121)
+# Helpers
 # ---------------------------------------------------------------------------
-
-_BASE_GROUP = {
-    "group_id": 0,
-    "layer_count": 2,
-    "layer_names": ["model.layers.0.self_attn", "model.layers.1.self_attn"],
-    "block_size": 16,
-    "page_size_bytes": 131072,
-    "layer_specs": None,
-}
 
 
 def _full_attention_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "full_attention",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "head_size_v": 128,
-        "dtype": "bfloat16",
-        "sliding_window": None,
-        "attention_chunk_size": None,
-        **overrides,
-    }
-
-
-def _mla_attention_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "mla_attention",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "head_size_v": 64,
-        "dtype": "bfloat16",
-        "sliding_window": None,
-        "attention_chunk_size": None,
-        "cache_dtype_str": "float8_e4m3fn",
-        **overrides,
-    }
-
-
-def _sliding_window_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "sliding_window",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "dtype": "float16",
-        "sliding_window": 4096,
-        **overrides,
-    }
-
-
-def _sliding_window_mla_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "sliding_window_mla",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "head_size_v": 64,
-        "dtype": "bfloat16",
-        "sliding_window": 4096,
-        "cache_dtype_str": "float8_e4m3fn",
-        **overrides,
-    }
-
-
-def _chunked_local_attention_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "chunked_local_attention",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "dtype": "float16",
-        "attention_chunk_size": 2048,
-        **overrides,
-    }
+    return group_dict("full_attention", **overrides)
 
 
 def _mamba_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "mamba",
-        "block_size": 1,
-        "page_size_bytes": 4096,
-        "shapes": [[16, 128], [16, 64]],
-        "dtypes": ["float32", "float32"],
-        "mamba_type": "mamba2",
-        "mamba_cache_mode": "none",
-        **overrides,
-    }
-
-
-def _cross_attention_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "cross_attention",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "dtype": "bfloat16",
-        **overrides,
-    }
-
-
-def _encoder_only_attention_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "encoder_only_attention",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "dtype": "bfloat16",
-        **overrides,
-    }
-
-
-def _sink_full_attention_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "sink_full_attention",
-        "num_kv_heads": 8,
-        "head_size": 128,
-        "head_size_v": 128,
-        "dtype": "bfloat16",
-        "sliding_window": 2048,
-        "attention_chunk_size": None,
-        "sink_len": 4,
-        **overrides,
-    }
-
-
-def _unknown_dict(**overrides) -> dict:
-    return {
-        **_BASE_GROUP,
-        "kind": "unknown",
-        **overrides,
-    }
-
-
-def _uniform_type_dict(**overrides) -> dict:
-    # A UniformTypeKVCacheSpecs group resolves to its inner kind (here
-    # full_attention) and carries a populated `layer_specs` list.
-    return _full_attention_dict(
-        layer_specs=[
-            {"head_size": 128, "dtype": "bfloat16"},
-            {"head_size": 64, "dtype": "bfloat16"},
-        ],
-        **overrides,
-    )
+    return group_dict("mamba", **overrides)
 
 
 def _capacity_data(**overrides) -> dict:
@@ -262,57 +115,25 @@ def _make_test_app(
 
 
 class TestBuildGroupSpecDispatch:
-    def test_full_attention_spec(self):
-        result = _build_group_spec(_full_attention_dict())
-        assert isinstance(result, FullAttentionGroupSpec)
-        assert result.kind == "full_attention"
-
-    def test_mla_attention_spec(self):
-        result = _build_group_spec(_mla_attention_dict())
-        assert isinstance(result, MLAAttentionGroupSpec)
-
-    def test_sliding_window_spec(self):
-        result = _build_group_spec(_sliding_window_dict())
-        assert isinstance(result, SlidingWindowGroupSpec)
-
-    def test_sliding_window_mla_spec(self):
-        result = _build_group_spec(_sliding_window_mla_dict())
-        assert isinstance(result, SlidingWindowMLAGroupSpec)
-
-    def test_chunked_local_attention_spec(self):
-        result = _build_group_spec(_chunked_local_attention_dict())
-        assert isinstance(result, ChunkedLocalAttentionGroupSpec)
-
-    def test_mamba_spec(self):
-        result = _build_group_spec(_mamba_dict())
-        assert isinstance(result, MambaGroupSpec)
-
-    def test_cross_attention_spec(self):
-        result = _build_group_spec(_cross_attention_dict())
-        assert isinstance(result, CrossAttentionGroupSpec)
-
-    def test_encoder_only_attention_spec(self):
-        result = _build_group_spec(_encoder_only_attention_dict())
-        assert isinstance(result, EncoderOnlyAttentionGroupSpec)
-
-    def test_sink_full_attention_spec(self):
-        result = _build_group_spec(_sink_full_attention_dict())
-        assert isinstance(result, SinkFullAttentionGroupSpec)
-
-    def test_unknown_spec(self):
-        result = _build_group_spec(_unknown_dict())
-        assert isinstance(result, UnknownGroupSpec)
+    @pytest.mark.parametrize("kind", ALL_KINDS)
+    def test_dispatches_on_kind(self, kind):
+        result = _build_group_spec(group_dict(kind))
+        assert type(result) is SPEC_CLS_BY_KIND[kind]
+        assert result.kind == kind
 
     def test_uniform_type_spec_resolves_to_inner_kind(self):
-        result = _build_group_spec(_uniform_type_dict())
-        assert isinstance(result, FullAttentionGroupSpec)
-        assert result.layer_specs == [
+        # A UniformTypeKVCacheSpecs group resolves to its inner kind (here
+        # full_attention) and carries a populated `layer_specs` list.
+        layer_specs = [
             {"head_size": 128, "dtype": "bfloat16"},
             {"head_size": 64, "dtype": "bfloat16"},
         ]
+        result = _build_group_spec(_full_attention_dict(layer_specs=layer_specs))
+        assert isinstance(result, FullAttentionGroupSpec)
+        assert result.layer_specs == layer_specs
 
     def test_unhandled_kind_raises_value_error(self):
-        group = {**_BASE_GROUP, "kind": "made_up_kind"}
+        group = {**BASE_GROUP, "kind": "made_up_kind"}
         with pytest.raises(ValueError, match="Unhandled KVCacheSpec kind"):
             _build_group_spec(group)
 
@@ -320,7 +141,7 @@ class TestBuildGroupSpecDispatch:
         result = _build_group_spec(_full_attention_dict(group_id=3))
         assert result.group_id == 3
         assert result.layer_count == 2
-        assert result.layer_names == _BASE_GROUP["layer_names"]
+        assert result.layer_names == BASE_GROUP["layer_names"]
         assert result.block_size == 16
         assert result.page_size_bytes == 131072
 

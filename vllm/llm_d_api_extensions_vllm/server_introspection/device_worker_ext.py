@@ -16,12 +16,9 @@ Enable with:
 
 from typing import Any
 
-from vllm.logger import init_logger
+from .common import get_logger
 
-# "vllm." prefix required. vLLM's default logging config only attaches a
-# handler to the "vllm" logger tree (propagate=False), so a bare __name__
-# logger has no handler anywhere and silently drops every message.
-logger = init_logger(f"vllm.{__name__}")
+logger = get_logger(__name__)
 
 # Worker method name the `devices` plugin calls over `collective_rpc`. Shared
 # so a rename breaks at import time rather than at RPC dispatch.

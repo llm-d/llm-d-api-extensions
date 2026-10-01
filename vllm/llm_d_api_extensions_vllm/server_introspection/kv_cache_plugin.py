@@ -24,11 +24,10 @@ engine (there is nothing to introspect on the CPU only render server).
 from argparse import Namespace
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, Request
 from starlette.datastructures import State
-from vllm.logger import init_logger
-from vllm.tasks import GENERATION_TASKS, POOLING_TASKS
 
+from .common import ENGINE_TASKS, cached_response, get_logger, no_engine_detail
 from .schemas import (
     ChunkedLocalAttentionGroupSpec,
     CrossAttentionGroupSpec,
@@ -47,12 +46,7 @@ if TYPE_CHECKING:
     from vllm.config import VllmConfig
     from vllm.engine.protocol import EngineClient
 
-# "vllm." prefix required. vLLM's default logging config only attaches a
-# handler to the "vllm" logger tree (propagate=False), so a bare __name__
-# logger has no handler anywhere and silently drops every message.
-logger = init_logger(f"vllm.{__name__}")
-
-_UNSET = object()
+logger = get_logger(__name__)
 
 _KIND_TO_MODEL: dict[str, type] = {
     "full_attention": FullAttentionGroupSpec,
@@ -115,7 +109,7 @@ def _capacity_from_vllm_config(vllm_config: "VllmConfig") -> dict:
 
 class ServerKVCachePlugin:
     name = "llm_d_server_introspection_kv_cache"
-    required_tasks: tuple[str, ...] | None = GENERATION_TASKS + POOLING_TASKS
+    required_tasks: tuple[str, ...] | None = ENGINE_TASKS
 
     def attach_router(self, app: FastAPI) -> None:
         router = APIRouter()
@@ -125,18 +119,9 @@ class ServerKVCachePlugin:
             response_model=KVCacheResponse,
         )
         async def get_kv_cache(raw_request: Request) -> KVCacheResponse:
-            response = getattr(raw_request.app.state, "server_kv_cache_response", _UNSET)
-            if response is _UNSET:
-                raise HTTPException(
-                    status_code=500,
-                    detail="server_kv_cache plugin state was never initialized",
-                )
-            if response is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="kv-cache requires an engine, which this server does not have",
-                )
-            return response
+            return cached_response(
+                raw_request, "server_kv_cache_response", no_engine_detail("kv-cache")
+            )
 
         app.include_router(router)
 

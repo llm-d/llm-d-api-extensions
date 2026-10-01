@@ -18,25 +18,19 @@ engine (there is nothing to introspect on the CPU only render server).
 from argparse import Namespace
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, Request
 from starlette.datastructures import State
-from vllm.logger import init_logger
-from vllm.tasks import GENERATION_TASKS, POOLING_TASKS
 
+from .common import ENGINE_TASKS, cached_response, get_logger, no_engine_detail
 from .device_worker_ext import GET_DEVICE_PROPERTIES
 from .schemas import ComputeCapability, DeviceInfo, DevicesResponse
 
 if TYPE_CHECKING:
     from vllm.engine.protocol import EngineClient
 
-# "vllm." prefix required. vLLM's default logging config only attaches a
-# handler to the "vllm" logger tree (propagate=False), so a bare __name__
-# logger has no handler anywhere and silently drops every message.
-logger = init_logger(f"vllm.{__name__}")
+logger = get_logger(__name__)
 
-_UNSET = object()
-
-_NO_ENGINE_DETAIL = "devices requires an engine, which this server does not have"
+_NO_ENGINE_DETAIL = no_engine_detail("devices")
 _NO_WORKER_EXT_DETAIL = (
     "devices requires the DeviceInfoWorkerExtension worker extension "
     "(--worker-extension-cls), which is not installed on this server"
@@ -65,7 +59,7 @@ def _build_response(raw_devices: list[dict]) -> DevicesResponse:
 
 class ServerDevicesPlugin:
     name = "llm_d_server_introspection_devices"
-    required_tasks: tuple[str, ...] | None = GENERATION_TASKS + POOLING_TASKS
+    required_tasks: tuple[str, ...] | None = ENGINE_TASKS
 
     def attach_router(self, app: FastAPI) -> None:
         router = APIRouter()
@@ -75,22 +69,10 @@ class ServerDevicesPlugin:
             response_model=DevicesResponse,
         )
         async def get_devices(raw_request: Request) -> DevicesResponse:
-            response = getattr(raw_request.app.state, "server_devices_response", _UNSET)
-            if response is _UNSET:
-                raise HTTPException(
-                    status_code=500,
-                    detail="server_devices plugin state was never initialized",
-                )
-            if response is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail=getattr(
-                        raw_request.app.state,
-                        "server_devices_unavailable_detail",
-                        _NO_ENGINE_DETAIL,
-                    ),
-                )
-            return response
+            unavailable_detail = getattr(
+                raw_request.app.state, "server_devices_unavailable_detail", _NO_ENGINE_DETAIL
+            )
+            return cached_response(raw_request, "server_devices_response", unavailable_detail)
 
         app.include_router(router)
 
