@@ -1,0 +1,26 @@
+# Dependabot configuration for llm-d-api-extensions
+# Based on the canonical config from llm-d/llm-d-infra
+
+version: 2
+updates:
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "release-note-none"
+    commit-message:
+      prefix: "deps(actions)"
+
+  # Python dependencies for the vLLM extensions
+  - package-ecosystem: "pip"
+    directory: "/vllm"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps(pip)"

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-d-api-extensions-vllm"
+version = "0.1.0"
+description = "llm-d API extensions for vLLM, integrated as endpoint plugins"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "vllm",
+    "fastapi",
+    "pydantic>=2",
+]
+
+[project.urls]
+Homepage = "https://github.com/llm-d/llm-d-api-extensions"
+Source = "https://github.com/llm-d/llm-d-api-extensions/tree/main/vllm"
+Issues = "https://github.com/llm-d/llm-d-api-extensions/issues"
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio", "httpx"]
+
+# Endpoint plugins are opt-in. vLLM only loads the ones named in `VLLM_PLUGINS`.
+[project.entry-points."vllm.endpoint_plugins"]
+llm_d_server_introspection_config = "llm_d_api_extensions_vllm.server_introspection.config_plugin:ServerConfigPlugin"
+llm_d_server_introspection_devices = "llm_d_api_extensions_vllm.server_introspection.devices_plugin:ServerDevicesPlugin"
+llm_d_server_introspection_kv_cache = "llm_d_api_extensions_vllm.server_introspection.kv_cache_plugin:ServerKVCachePlugin"
+
+[tool.setuptools.packages.find]
+include = ["llm_d_api_extensions_vllm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Lets `pytest tests/` run straight from a clone without an editable install first.
+pythonpath = ["."]

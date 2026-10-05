@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/llm-d/llm-d-api-extensions/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately, not as a public issue.
+  - name: llm-d project discussion
+    url: https://github.com/llm-d/llm-d/issues
+    about: For questions about llm-d as a whole rather than these extensions.
