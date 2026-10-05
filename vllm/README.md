@@ -46,11 +46,7 @@ Operator supplied, config time values of how the server was launched. Nothing pr
     "kv_role": "kv_both",
     "kv_connector_module_path": null,
     "kv_buffer_device": "cuda",
-    "kv_buffer_size": 1000000000.0,
-    "kv_ip": "127.0.0.1",
     "kv_port": 14579,
-    "kv_parallel_size": 1,
-    "kv_rank": null,
     "engine_id": "engine-0",
     "extra_config": {},
     "nixl_side_channel_host": "localhost",
@@ -97,7 +93,7 @@ Against a vLLM build without `EngineClient.get_kv_cache_group_metadata()` ([vllm
   "num_cpu_blocks": 0,
   "groups": [
     {
-      "group_id": 0,
+      "group_idx": 0,
       "kind": "full_attention",
       "layer_count": 32,
       "layer_names": ["model.layers.0.self_attn", "..."],

@@ -120,11 +120,7 @@ def _make_kv_transfer_config(
     kv_role: str | None = "kv_both",
     kv_connector_module_path: str | None = None,
     kv_buffer_device: str = "cuda",
-    kv_buffer_size: float = 1e9,
-    kv_ip: str = "127.0.0.1",
     kv_port: int = 14579,
-    kv_parallel_size: int = 1,
-    kv_rank: int | None = None,
     engine_id: str | None = "engine-0",
     kv_connector_extra_config: dict | None = None,
 ) -> MagicMock:
@@ -133,11 +129,7 @@ def _make_kv_transfer_config(
     cfg.kv_role = kv_role
     cfg.kv_connector_module_path = kv_connector_module_path
     cfg.kv_buffer_device = kv_buffer_device
-    cfg.kv_buffer_size = kv_buffer_size
-    cfg.kv_ip = kv_ip
     cfg.kv_port = kv_port
-    cfg.kv_parallel_size = kv_parallel_size
-    cfg.kv_rank = kv_rank
     cfg.engine_id = engine_id
     cfg.kv_connector_extra_config = kv_connector_extra_config or {}
     return cfg

@@ -205,7 +205,7 @@ def test_kv_cache_response_discriminates_group_spec_types_on_validate():
     # A discriminated union must reconstruct the correct concrete class from
     # raw JSON, not just accept already typed model instances.
     dumped = KVCacheResponse(
-        groups=[_spec("full_attention"), _spec("mamba", group_id=1)]
+        groups=[_spec("full_attention"), _spec("mamba", group_idx=1)]
     ).model_dump()
     restored = KVCacheResponse.model_validate(dumped)
     assert isinstance(restored.groups[0], FullAttentionGroupSpec)
