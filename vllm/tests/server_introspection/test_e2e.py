@@ -159,7 +159,7 @@ def test_server_kv_cache_endpoint_returns_200_with_valid_schema():
     }
     # `EngineClient.get_kv_cache_group_metadata` (vllm-project/vllm#48121)
     # isn't in a released vLLM yet, so this real server exercises the
-    # capacity only fallback path whioch means capacity fields populated, no group
+    # capacity only fallback path which means capacity fields populated, no group
     # structure.
     assert data["num_gpu_blocks"] > 0
     assert data["kv_cache_size_tokens"] > 0
