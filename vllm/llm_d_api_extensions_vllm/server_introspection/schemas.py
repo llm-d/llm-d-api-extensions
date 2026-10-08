@@ -48,11 +48,7 @@ class KVTransferInfo(BaseModel):
     kv_role: str | None
     kv_connector_module_path: str | None = None
     kv_buffer_device: str | None = None
-    kv_buffer_size: float | None = None
-    kv_ip: str | None = None
     kv_port: int | None = None
-    kv_parallel_size: int | None = None
-    kv_rank: int | None = None
     engine_id: str | None = None
     extra_config: dict = Field(default_factory=dict)
     # NIXL side channel base endpoint (env derived only when connector is
@@ -100,7 +96,7 @@ class DevicesResponse(BaseModel):
 
 
 class _KVCacheGroupBase(BaseModel):
-    group_id: int
+    group_idx: int
     layer_count: int
     layer_names: list[str]
     block_size: int

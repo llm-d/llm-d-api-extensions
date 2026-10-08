@@ -18,7 +18,7 @@ from llm_d_api_extensions_vllm.server_introspection.schemas import (
 )
 
 BASE_GROUP = {
-    "group_id": 0,
+    "group_idx": 0,
     "layer_count": 2,
     "layer_names": ["model.layers.0.self_attn", "model.layers.1.self_attn"],
     "block_size": 16,

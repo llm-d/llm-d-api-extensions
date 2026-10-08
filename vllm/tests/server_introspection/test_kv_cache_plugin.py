@@ -138,8 +138,8 @@ class TestBuildGroupSpecDispatch:
             _build_group_spec(group)
 
     def test_preserves_base_fields(self):
-        result = _build_group_spec(_full_attention_dict(group_id=3))
-        assert result.group_id == 3
+        result = _build_group_spec(_full_attention_dict(group_idx=3))
+        assert result.group_idx == 3
         assert result.layer_count == 2
         assert result.layer_names == BASE_GROUP["layer_names"]
         assert result.block_size == 16
@@ -194,7 +194,7 @@ class TestBuildResponseCapacityFields:
 
 class TestBuildResponseGroups:
     def test_hybrid_model_two_groups(self):
-        groups = [_full_attention_dict(group_id=0), _mamba_dict(group_id=1)]
+        groups = [_full_attention_dict(group_idx=0), _mamba_dict(group_idx=1)]
         resp = _build_response(_kv_cache_data(groups=groups))
         assert len(resp.groups) == 2
         assert isinstance(resp.groups[0], FullAttentionGroupSpec)
@@ -301,7 +301,7 @@ class TestGetKVCacheEndpoint:
         assert resp.status_code == 405
 
     def test_groups_serialized_correctly(self):
-        groups = [_full_attention_dict(group_id=0), _mamba_dict(group_id=1)]
+        groups = [_full_attention_dict(group_idx=0), _mamba_dict(group_idx=1)]
         fake_client = _FakeEngineClient(groups)
         app = _make_test_app(fake_client)
         with TestClient(app) as client:
