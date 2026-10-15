@@ -16,12 +16,21 @@ engine (there is nothing to introspect on the CPU only render server).
 """
 
 from argparse import Namespace
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, FastAPI, Request
 from starlette.datastructures import State
 
-from .common import ENGINE_TASKS, cached_response, get_logger, no_engine_detail
+from .common import (
+    ENGINE_TASKS,
+    build_tolerant,
+    cached_response,
+    get_logger,
+    guarded_init_state,
+    no_engine_detail,
+    report_drift,
+)
 from .device_worker_ext import GET_DEVICE_PROPERTIES
 from .schemas import ComputeCapability, DeviceInfo, DevicesResponse
 
@@ -37,23 +46,33 @@ _NO_WORKER_EXT_DETAIL = (
 )
 
 
-def _build_response(raw_devices: list[dict]) -> DevicesResponse:
-    devices = []
-    for d in raw_devices:
-        cap = d.get("compute_capability")
-        devices.append(
-            DeviceInfo(
-                rank=d["rank"],
-                name=d["name"],
-                total_memory_bytes=d["total_memory_bytes"],
-                compute_capability=(
-                    ComputeCapability(major=cap["major"], minor=cap["minor"])
-                    if cap is not None
-                    else None
-                ),
-                num_compute_units=d["num_compute_units"],
-            )
+def _build_device(raw_device: object) -> DeviceInfo | None:
+    if not isinstance(raw_device, Mapping):
+        report_drift(f"device properties entry is a {type(raw_device).__name__}, not a dict")
+        return None
+    cap = raw_device.get("compute_capability")
+    return build_tolerant(
+        DeviceInfo,
+        rank=raw_device.get("rank"),
+        name=raw_device.get("name"),
+        total_memory_bytes=raw_device.get("total_memory_bytes"),
+        compute_capability=(
+            build_tolerant(ComputeCapability, major=cap.get("major"), minor=cap.get("minor"))
+            if isinstance(cap, Mapping)
+            else None
+        ),
+        num_compute_units=raw_device.get("num_compute_units"),
+    )
+
+
+def _build_response(raw_devices: object) -> DevicesResponse:
+    if not isinstance(raw_devices, list | tuple):
+        report_drift(
+            f"collective_rpc({GET_DEVICE_PROPERTIES!r}) returned a "
+            f"{type(raw_devices).__name__}, not a list"
         )
+        raw_devices = []
+    devices = [device for d in raw_devices if (device := _build_device(d)) is not None]
     return DevicesResponse(devices=devices)
 
 
@@ -69,13 +88,11 @@ class ServerDevicesPlugin:
             response_model=DevicesResponse,
         )
         async def get_devices(raw_request: Request) -> DevicesResponse:
-            unavailable_detail = getattr(
-                raw_request.app.state, "server_devices_unavailable_detail", _NO_ENGINE_DETAIL
-            )
-            return cached_response(raw_request, "server_devices_response", unavailable_detail)
+            return cached_response(raw_request, "server_devices_response", _NO_ENGINE_DETAIL)
 
         app.include_router(router)
 
+    @guarded_init_state("server_devices_response", "devices")
     async def init_state(
         self, engine_client: "EngineClient | None", state: State, args: Namespace
     ) -> None:

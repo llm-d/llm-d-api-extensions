@@ -2,6 +2,10 @@
 """Pydantic response models for the `/plugins/llm-d-server-introspection/*` introspection endpoints.
 
 Shared across all endpoint plugins in this package.
+
+Every field sourced from vLLM is nullable. vLLM's config objects and engine
+metadata are internal API, so a field vLLM renames, removes or retypes is
+reported as `null` rather than failing the response (see `common.py`).
 """
 
 from typing import Annotated, Literal
@@ -10,42 +14,42 @@ from pydantic import BaseModel, Field
 
 
 class ModelInfo(BaseModel):
-    name: str
-    served_names: list[str]
-    dtype: str
-    quantization: str | None
-    max_model_len: int
+    name: str | None = None
+    served_names: list[str] | None = None
+    dtype: str | None = None
+    quantization: str | None = None
+    max_model_len: int | None = None
 
 
 class KVCacheInfo(BaseModel):
-    gpu_memory_utilization: float
-    dtype: str
-    enable_prefix_caching: bool
+    gpu_memory_utilization: float | None = None
+    dtype: str | None = None
+    enable_prefix_caching: bool | None = None
 
 
 class SchedulerInfo(BaseModel):
-    max_num_seqs: int
-    max_num_batched_tokens: int
-    enable_chunked_prefill: bool
-    policy: str
+    max_num_seqs: int | None = None
+    max_num_batched_tokens: int | None = None
+    enable_chunked_prefill: bool | None = None
+    policy: str | None = None
 
 
 class ParallelismInfo(BaseModel):
-    tensor_parallel_size: int
-    pipeline_parallel_size: int
-    data_parallel_size: int
-    data_parallel_rank: int
+    tensor_parallel_size: int | None = None
+    pipeline_parallel_size: int | None = None
+    data_parallel_size: int | None = None
+    data_parallel_rank: int | None = None
 
 
 class FeaturesInfo(BaseModel):
-    speculative_decoding: bool
-    lora: bool
-    hma: bool
+    speculative_decoding: bool | None = None
+    lora: bool | None = None
+    hma: bool | None = None
 
 
 class KVTransferInfo(BaseModel):
-    kv_connector: str | None
-    kv_role: str | None
+    kv_connector: str | None = None
+    kv_role: str | None = None
     kv_connector_module_path: str | None = None
     kv_buffer_device: str | None = None
     kv_port: int | None = None
@@ -68,14 +72,14 @@ class ServerConfigResponse(BaseModel):
 
 
 class ComputeCapability(BaseModel):
-    major: int
-    minor: int
+    major: int | None = None
+    minor: int | None = None
 
 
 class DeviceInfo(BaseModel):
-    rank: int
-    name: str
-    total_memory_bytes: int
+    rank: int | None = None
+    name: str | None = None
+    total_memory_bytes: int | None = None
     compute_capability: ComputeCapability | None = None
     num_compute_units: int | None = None
 
@@ -91,26 +95,27 @@ class DevicesResponse(BaseModel):
 # serializes groups under (vllm-project/vllm#48121). Every group dict carries
 # the full field superset (irrelevant fields sent as `None`). Pydantic's
 # default `extra="ignore"` behavior drops whichever ones a given `kind`
-# doesn't declare.
+# doesn't declare. A `kind` this package does not know is reported as
+# `UnknownGroupSpec` with the original string in `vllm_kind`.
 # ---------------------------------------------------------------------------
 
 
 class _KVCacheGroupBase(BaseModel):
-    group_idx: int
-    layer_count: int
-    layer_names: list[str]
-    block_size: int
-    page_size_bytes: int
+    group_idx: int | None = None
+    layer_count: int | None = None
+    layer_names: list[str] | None = None
+    block_size: int | None = None
+    page_size_bytes: int | None = None
     # Present (non-None) only when the group fans out a UniformTypeKVCacheSpecs
     # into its per layer specs.
     layer_specs: list[dict] | None = None
 
 
 class _FullAttentionBaseSpec(_KVCacheGroupBase):
-    num_kv_heads: int
-    head_size: int
-    head_size_v: int
-    dtype: str
+    num_kv_heads: int | None = None
+    head_size: int | None = None
+    head_size_v: int | None = None
+    dtype: str | None = None
     sliding_window: int | None = None
     attention_chunk_size: int | None = None
 
@@ -126,50 +131,50 @@ class MLAAttentionGroupSpec(_FullAttentionBaseSpec):
 
 class SlidingWindowGroupSpec(_KVCacheGroupBase):
     kind: Literal["sliding_window"] = "sliding_window"
-    num_kv_heads: int
-    head_size: int
-    dtype: str
-    sliding_window: int
+    num_kv_heads: int | None = None
+    head_size: int | None = None
+    dtype: str | None = None
+    sliding_window: int | None = None
 
 
 class SlidingWindowMLAGroupSpec(_KVCacheGroupBase):
     kind: Literal["sliding_window_mla"] = "sliding_window_mla"
-    num_kv_heads: int
-    head_size: int
-    head_size_v: int
-    dtype: str
-    sliding_window: int
+    num_kv_heads: int | None = None
+    head_size: int | None = None
+    head_size_v: int | None = None
+    dtype: str | None = None
+    sliding_window: int | None = None
     cache_dtype_str: str | None = None
 
 
 class ChunkedLocalAttentionGroupSpec(_KVCacheGroupBase):
     kind: Literal["chunked_local_attention"] = "chunked_local_attention"
-    num_kv_heads: int
-    head_size: int
-    dtype: str
-    attention_chunk_size: int
+    num_kv_heads: int | None = None
+    head_size: int | None = None
+    dtype: str | None = None
+    attention_chunk_size: int | None = None
 
 
 class MambaGroupSpec(_KVCacheGroupBase):
     kind: Literal["mamba"] = "mamba"
-    shapes: list[list[int]]
-    dtypes: list[str]
-    mamba_type: str
-    mamba_cache_mode: str
+    shapes: list[list[int]] | None = None
+    dtypes: list[str] | None = None
+    mamba_type: str | None = None
+    mamba_cache_mode: str | None = None
 
 
 class CrossAttentionGroupSpec(_KVCacheGroupBase):
     kind: Literal["cross_attention"] = "cross_attention"
-    num_kv_heads: int
-    head_size: int
-    dtype: str
+    num_kv_heads: int | None = None
+    head_size: int | None = None
+    dtype: str | None = None
 
 
 class EncoderOnlyAttentionGroupSpec(_KVCacheGroupBase):
     kind: Literal["encoder_only_attention"] = "encoder_only_attention"
-    num_kv_heads: int
-    head_size: int
-    dtype: str
+    num_kv_heads: int | None = None
+    head_size: int | None = None
+    dtype: str | None = None
 
 
 class SinkFullAttentionGroupSpec(_FullAttentionBaseSpec):
@@ -179,6 +184,8 @@ class SinkFullAttentionGroupSpec(_FullAttentionBaseSpec):
 
 class UnknownGroupSpec(_KVCacheGroupBase):
     kind: Literal["unknown"] = "unknown"
+    # The `kind` vLLM reported when this package has no schema for it.
+    vllm_kind: str | None = None
 
 
 KVCacheGroupSpec = Annotated[

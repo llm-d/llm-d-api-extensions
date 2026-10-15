@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from llm_d_api_extensions_vllm.server_introspection import devices_plugin
 from llm_d_api_extensions_vllm.server_introspection.device_worker_ext import (
     GET_DEVICE_PROPERTIES,
     DeviceInfoWorkerExtension,
@@ -216,6 +217,55 @@ class TestGetDevicesEndpoint:
         data = resp.json()
         assert data["devices"][0]["compute_capability"] is None
         assert data["devices"][0]["num_compute_units"] is None
+
+
+# ---------------------------------------------------------------------------
+# vLLM drift: worker results changing shape upstream
+# ---------------------------------------------------------------------------
+
+
+class TestVllmDrift:
+    def test_platform_without_device_introspection_serves_nulls(self):
+        # What the worker extension returns when `current_platform` implements
+        # none of the device methods.
+        entry = dict.fromkeys(_A100_ENTRY, None) | {"rank": 0}
+        app = _make_test_app(_FakeEngineClient(rpc_result=[entry]))
+        with TestClient(app) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/devices")
+        assert resp.status_code == 200
+        assert resp.json()["devices"] == [entry]
+
+    def test_missing_keys_are_null(self):
+        result = _build_response([{"rank": 1}])
+        assert result.devices == [DeviceInfo(rank=1)]
+
+    def test_retyped_field_is_null(self):
+        result = _build_response([{**_A100_ENTRY, "total_memory_bytes": "40GiB"}])
+        assert result.devices[0].total_memory_bytes is None
+        assert result.devices[0].name == "A100-PCIE-40GB"
+
+    def test_partial_compute_capability(self):
+        result = _build_response([{**_A100_ENTRY, "compute_capability": {"major": 8}}])
+        assert result.devices[0].compute_capability == ComputeCapability(major=8, minor=None)
+
+    def test_non_dict_entry_is_skipped(self):
+        result = _build_response([None, _A100_ENTRY])
+        assert [d.name for d in result.devices] == ["A100-PCIE-40GB"]
+
+    def test_rpc_result_not_a_list_serves_no_devices(self):
+        app = _make_test_app(_FakeEngineClient(rpc_result={"unexpected": "shape"}))
+        assert app.state.server_devices_response == DevicesResponse(devices=[])
+
+    def test_unexpected_init_failure_returns_503_and_does_not_raise(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise RuntimeError("vLLM changed something unforeseen")
+
+        monkeypatch.setattr(devices_plugin, "_build_response", _boom)
+        app = _make_test_app(_FakeEngineClient(rpc_result=[_A100_ENTRY]))
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/devices")
+        assert resp.status_code == 503
+        assert "RuntimeError" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

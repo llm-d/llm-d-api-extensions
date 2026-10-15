@@ -99,3 +99,29 @@ class TestGetDeviceProperties:
         _use_platform(monkeypatch, _BrokenNamePlatform())
         with pytest.raises(RuntimeError, match="boom"):
             _Worker(rank=0, local_rank=0).get_device_properties()
+
+    def test_platform_missing_a_method_falls_back_to_none(self, monkeypatch):
+        # vLLM renamed or removed a `current_platform` device method.
+        class _RenamedPlatform(_GpuPlatform):
+            num_compute_units = None
+
+        _use_platform(monkeypatch, _RenamedPlatform())
+        props = _Worker(rank=0, local_rank=0).get_device_properties()
+        assert props["num_compute_units"] is None
+        assert props["name"] == "H100-SXM5-80GB"
+
+    def test_worker_without_rank_attributes(self, monkeypatch):
+        platform = _GpuPlatform()
+        _use_platform(monkeypatch, platform)
+        props = DeviceInfoWorkerExtension().get_device_properties()
+        assert props["rank"] is None
+        assert platform.device_ids == [0]
+
+    def test_capability_without_major_minor(self, monkeypatch):
+        class _OddCapabilityPlatform(_GpuPlatform):
+            def get_device_capability(self, device_id):
+                return SimpleNamespace(major=9)
+
+        _use_platform(monkeypatch, _OddCapabilityPlatform())
+        props = _Worker(rank=0, local_rank=0).get_device_properties()
+        assert props["compute_capability"] == {"major": 9, "minor": None}

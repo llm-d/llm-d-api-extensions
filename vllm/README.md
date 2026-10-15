@@ -110,6 +110,16 @@ Against a vLLM build without `EngineClient.get_kv_cache_group_metadata()` ([vllm
 }
 ```
 
+## vLLM version tolerance
+
+Everything these endpoints report is read from vLLM internals (`VllmConfig`, `EngineClient`, `current_platform`), which can change between vLLM releases. The plugins are written so that such a change never stops the server from starting:
+
+- **Every vLLM sourced field is nullable.** A field vLLM renamed, removed or retyped is returned as `null` and the rest of the response is unaffected. Clients must treat `null` as "not available from this vLLM version".
+- **A KV cache group of a `kind` this package has no schema for** is returned with `"kind": "unknown"` and the original string in `vllm_kind`.
+- **If a plugin still fails to initialize**, the failure is logged with a traceback and that endpoint returns `503` with the reason. The server and the other endpoints keep working.
+
+Each degradation is logged once as a warning starting with `server introspection:` and naming the vLLM attribute involved.
+
 ## Install
 
 ```bash
@@ -154,9 +164,14 @@ pip install -e .[test]
 # fast unit tests (schema + FastAPI route, no engine, no real model)
 pytest tests/ -v
 
+# only the check that the installed vLLM still has what the plugins read
+pytest tests/server_introspection/test_vllm_contract.py -v
+
 # real server e2e (downloads model weights, launches a subprocess server)
 RUN_VLLM_E2E=1 pytest tests/server_introspection/test_e2e.py -v
 ```
+
+`test_vllm_contract.py` runs the plugins against the installed vLLM's real config classes and fails, naming the attribute when vLLM no longer has something a plugin reads. CI runs it against the released and the nightly vLLM on every PR and daily. When it fails, update the plugin, the schema and this README for the change. Until then the affected field is served as `null` (see [vLLM version tolerance](#vllm-version-tolerance)).
 
 Lint and format with [ruff](https://docs.astral.sh/ruff/), matching what CI runs:
 

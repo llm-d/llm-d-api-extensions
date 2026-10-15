@@ -8,14 +8,16 @@ exposes `get_kv_cache_group_metadata` so both the "new method present" and
 
 import asyncio
 from argparse import Namespace
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kv_group_fixtures import ALL_KINDS, BASE_GROUP, SPEC_CLS_BY_KIND, group_dict
 
+from llm_d_api_extensions_vllm.server_introspection import kv_cache_plugin
+from llm_d_api_extensions_vllm.server_introspection.common import drift_events
 from llm_d_api_extensions_vllm.server_introspection.kv_cache_plugin import (
     ServerKVCachePlugin,
     _build_group_spec,
@@ -26,6 +28,7 @@ from llm_d_api_extensions_vllm.server_introspection.schemas import (
     FullAttentionGroupSpec,
     KVCacheResponse,
     MambaGroupSpec,
+    UnknownGroupSpec,
 )
 
 # ---------------------------------------------------------------------------
@@ -82,24 +85,22 @@ def _make_vllm_config(
     block_size: int | None = 16,
     num_cpu_blocks: int | None = 0,
     max_model_len: int = 4096,
-) -> MagicMock:
-    cache_cfg = MagicMock()
+) -> SimpleNamespace:
+    cache_cfg = SimpleNamespace()
     cache_cfg.num_gpu_blocks = num_gpu_blocks
     cache_cfg.block_size = block_size
     cache_cfg.num_cpu_blocks = num_cpu_blocks
 
-    model_cfg = MagicMock()
+    model_cfg = SimpleNamespace()
     model_cfg.max_model_len = max_model_len
 
-    vllm_config = MagicMock()
+    vllm_config = SimpleNamespace()
     vllm_config.cache_config = cache_cfg
     vllm_config.model_config = model_cfg
     return vllm_config
 
 
-def _make_test_app(
-    engine_client: "_FakeEngineClient | None", vllm_config: MagicMock | None = None
-) -> FastAPI:
+def _make_test_app(engine_client: Any, vllm_config: SimpleNamespace | None = None) -> FastAPI:
     """FastAPI app with the plugin's route + state wired through both phases."""
     app = FastAPI()
     plugin = ServerKVCachePlugin()
@@ -132,10 +133,14 @@ class TestBuildGroupSpecDispatch:
         assert isinstance(result, FullAttentionGroupSpec)
         assert result.layer_specs == layer_specs
 
-    def test_unhandled_kind_raises_value_error(self):
-        group = {**BASE_GROUP, "kind": "made_up_kind"}
-        with pytest.raises(ValueError, match="Unhandled KVCacheSpec kind"):
-            _build_group_spec(group)
+    def test_unhandled_kind_becomes_unknown_group(self):
+        # vLLM added a `KVCacheSpecKind` this package has no schema for.
+        result = _build_group_spec({**BASE_GROUP, "kind": "made_up_kind", "num_kv_heads": 8})
+        assert type(result) is UnknownGroupSpec
+        assert result.kind == "unknown"
+        assert result.vllm_kind == "made_up_kind"
+        assert result.block_size == BASE_GROUP["block_size"]
+        assert drift_events() == ["KV cache group kind 'made_up_kind' is not known"]
 
     def test_preserves_base_fields(self):
         result = _build_group_spec(_full_attention_dict(group_idx=3))
@@ -322,6 +327,100 @@ class TestGetKVCacheEndpoint:
             "num_cpu_blocks",
             "groups",
         }
+
+
+# ---------------------------------------------------------------------------
+# vLLM drift: group metadata and cache config changing shape upstream
+# ---------------------------------------------------------------------------
+
+
+class _RaisingEngineClient:
+    async def get_kv_cache_group_metadata(self):
+        raise RuntimeError("engine RPC failed")
+
+
+class _SyncEngineClient:
+    def get_kv_cache_group_metadata(self):
+        return [_full_attention_dict()]
+
+
+class TestVllmDrift:
+    def test_minimal_group_dict_keeps_its_kind(self):
+        # The four key shape `EngineCore.get_kv_cache_group_metadata` returns today.
+        group = {"group_idx": 0, "kind": "full_attention", "block_size": 16, "sliding_window": None}
+        result = _build_group_spec(group)
+        assert type(result) is FullAttentionGroupSpec
+        assert result.block_size == 16
+        assert result.num_kv_heads is None
+        assert result.layer_names is None
+
+    def test_retyped_group_field_is_null(self):
+        result = _build_group_spec(_full_attention_dict(head_size="big"))
+        assert type(result) is FullAttentionGroupSpec
+        assert result.head_size is None
+        assert result.num_kv_heads == 8
+
+    def test_group_without_kind_becomes_unknown(self):
+        result = _build_group_spec({"group_idx": 2, "block_size": 16})
+        assert type(result) is UnknownGroupSpec
+        assert result.vllm_kind is None
+        assert result.group_idx == 2
+
+    def test_non_dict_group_is_skipped(self):
+        resp = _build_response(_kv_cache_data(groups=["nonsense", _full_attention_dict()]))
+        assert len(resp.groups) == 1
+
+    def test_metadata_call_failure_degrades_to_capacity_only(self):
+        app = _make_test_app(_RaisingEngineClient(), _make_vllm_config(num_gpu_blocks=2048))
+        with TestClient(app) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/kv-cache")
+        assert resp.status_code == 200
+        assert resp.json()["num_gpu_blocks"] == 2048
+        assert resp.json()["groups"] == []
+
+    def test_metadata_not_a_list_degrades_to_capacity_only(self):
+        app = _make_test_app(_FakeEngineClient(groups={"unexpected": "shape"}))
+        assert app.state.server_kv_cache_response.groups == []
+        assert drift_events() == ["get_kv_cache_group_metadata() returned a dict, not a list"]
+
+    def test_sync_metadata_method_is_accepted(self):
+        app = _make_test_app(_SyncEngineClient())
+        assert len(app.state.server_kv_cache_response.groups) == 1
+
+    def test_removed_cache_config_field_nulls_derived_capacity(self):
+        cfg = _make_vllm_config(num_cpu_blocks=512)
+        del cfg.cache_config.block_size
+        data = _capacity_from_vllm_config(cfg)
+        assert data["kv_cache_size_tokens"] is None
+        assert data["max_concurrency"] is None
+        assert data["num_gpu_blocks"] == 1024
+        assert data["num_cpu_blocks"] == 512
+
+    def test_retyped_capacity_inputs_do_not_raise(self):
+        data = _capacity_from_vllm_config(_make_vllm_config(num_gpu_blocks="many"))
+        assert data["kv_cache_size_tokens"] is None
+        assert _build_response(data).num_gpu_blocks is None
+
+    def test_missing_vllm_config_serves_nulls(self):
+        app = FastAPI()
+        plugin = ServerKVCachePlugin()
+        plugin.attach_router(app)
+        asyncio.run(plugin.init_state(_FakeEngineClient(), app.state, Namespace()))
+        with TestClient(app) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/kv-cache")
+        assert resp.status_code == 200
+        assert resp.json()["num_gpu_blocks"] is None
+
+    def test_unexpected_init_failure_returns_503_and_does_not_raise(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise RuntimeError("vLLM changed something unforeseen")
+
+        monkeypatch.setattr(kv_cache_plugin, "_build_response", _boom)
+        app = _make_test_app(_FakeEngineClient())
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/kv-cache")
+        assert resp.status_code == 503
+        assert "RuntimeError" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

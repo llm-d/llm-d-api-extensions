@@ -2,18 +2,22 @@
 """Unit tests for `GET /plugins/llm-d-server-introspection/config`.
 
 Fast, no engine and no real vLLM/model. `VllmConfig` and its sub configs are
-`MagicMock`s so the tests exercise `_build_response` and the FastAPI route in
-isolation.
+`SimpleNamespace`s so the tests exercise `_build_response` and the FastAPI
+route in isolation. Unlike a `MagicMock`, a namespace has only the attributes
+set on it, so the vLLM drift tests can remove one for real.
 """
 
 import asyncio
 from argparse import Namespace
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from llm_d_api_extensions_vllm.server_introspection import config_plugin
+from llm_d_api_extensions_vllm.server_introspection.common import drift_events
 from llm_d_api_extensions_vllm.server_introspection.config_plugin import (
     EXPOSE_EXTRA_CONFIG_ENV,
     REDACTED,
@@ -76,33 +80,33 @@ def _make_vllm_config(
     speculative_config=None,
     lora_config=None,
     kv_transfer_config=None,
-) -> MagicMock:
-    model_cfg = MagicMock()
+) -> SimpleNamespace:
+    model_cfg = SimpleNamespace()
     model_cfg.model = model_name
     model_cfg.served_model_name = served_model_name
     model_cfg.dtype = model_dtype
     model_cfg.quantization = quantization
     model_cfg.max_model_len = max_model_len
 
-    cache_cfg = MagicMock()
+    cache_cfg = SimpleNamespace()
     cache_cfg.gpu_memory_utilization = gpu_memory_utilization
     cache_cfg.cache_dtype = cache_dtype
     cache_cfg.enable_prefix_caching = enable_prefix_caching
 
-    scheduler_cfg = MagicMock()
+    scheduler_cfg = SimpleNamespace()
     scheduler_cfg.max_num_seqs = max_num_seqs
     scheduler_cfg.max_num_batched_tokens = max_num_batched_tokens
     scheduler_cfg.enable_chunked_prefill = enable_chunked_prefill
     scheduler_cfg.policy = policy
     scheduler_cfg.disable_hybrid_kv_cache_manager = disable_hybrid_kv_cache_manager
 
-    parallel_cfg = MagicMock()
+    parallel_cfg = SimpleNamespace()
     parallel_cfg.tensor_parallel_size = tensor_parallel_size
     parallel_cfg.pipeline_parallel_size = pipeline_parallel_size
     parallel_cfg.data_parallel_size = data_parallel_size
     parallel_cfg.data_parallel_rank = data_parallel_rank
 
-    vllm_config = MagicMock()
+    vllm_config = SimpleNamespace()
     vllm_config.model_config = model_cfg
     vllm_config.cache_config = cache_cfg
     vllm_config.scheduler_config = scheduler_cfg
@@ -123,8 +127,8 @@ def _make_kv_transfer_config(
     kv_port: int = 14579,
     engine_id: str | None = "engine-0",
     kv_connector_extra_config: dict | None = None,
-) -> MagicMock:
-    cfg = MagicMock()
+) -> SimpleNamespace:
+    cfg = SimpleNamespace()
     cfg.kv_connector = kv_connector
     cfg.kv_role = kv_role
     cfg.kv_connector_module_path = kv_connector_module_path
@@ -136,8 +140,8 @@ def _make_kv_transfer_config(
 
 
 def _make_test_app(
-    vllm_config: MagicMock,
-    served_model_name: list[str] | None = None,
+    vllm_config: SimpleNamespace,
+    served_model_name: list[str] | str | None = None,
 ) -> FastAPI:
     """FastAPI app with the plugin's route + state wired through both phases."""
     app = FastAPI()
@@ -397,6 +401,121 @@ class TestBuildResponseReturnType:
         cfg = _make_vllm_config(kv_transfer_config=_make_kv_transfer_config())
         resp = _build_response(cfg, ["m"])
         assert isinstance(resp.kv_transfer, KVTransferInfo)
+
+
+# ---------------------------------------------------------------------------
+# vLLM drift: config attributes renamed, removed or retyped upstream
+# ---------------------------------------------------------------------------
+
+
+class TestVllmDrift:
+    def test_no_drift_reported_for_complete_config(self):
+        _build_response(_make_vllm_config(kv_transfer_config=_make_kv_transfer_config()), ["m"])
+        assert drift_events() == []
+
+    def test_removed_field_is_null_and_siblings_survive(self):
+        cfg = _make_vllm_config(max_num_batched_tokens=4096)
+        del cfg.scheduler_config.max_num_seqs
+        resp = _build_response(cfg, ["m"])
+        assert resp.scheduler.max_num_seqs is None
+        assert resp.scheduler.max_num_batched_tokens == 4096
+        assert drift_events() == ["SimpleNamespace.max_num_seqs is not available"]
+
+    def test_removed_kv_transfer_field_is_null(self):
+        # The vllm-project/vllm#59781 class of change that prompted this.
+        kv_transfer_cfg = _make_kv_transfer_config()
+        del kv_transfer_cfg.kv_port
+        resp = _build_response(_make_vllm_config(kv_transfer_config=kv_transfer_cfg), ["m"])
+        assert resp.kv_transfer.kv_port is None
+        assert resp.kv_transfer.kv_connector == "NixlConnector"
+
+    def test_removed_kv_transfer_config_is_reported(self):
+        cfg = _make_vllm_config(kv_transfer_config=_make_kv_transfer_config())
+        del cfg.kv_transfer_config
+        resp = _build_response(cfg, ["m"])
+        assert resp.kv_transfer is None
+        assert drift_events() == ["SimpleNamespace.kv_transfer_config is not available"]
+
+    def test_removed_sub_config_nulls_its_section_only(self):
+        cfg = _make_vllm_config(max_model_len=4096)
+        del cfg.parallel_config
+        resp = _build_response(cfg, ["m"])
+        assert resp.parallelism == ParallelismInfo()
+        assert resp.model.max_model_len == 4096
+
+    def test_retyped_field_is_null(self):
+        cfg = _make_vllm_config(max_model_len="unlimited")
+        resp = _build_response(cfg, ["m"])
+        assert resp.model.max_model_len is None
+        assert resp.model.dtype == "bfloat16"
+
+    def test_removed_feature_config_is_unknown_not_false(self):
+        cfg = _make_vllm_config()
+        del cfg.lora_config
+        resp = _build_response(cfg, ["m"])
+        assert resp.features.lora is None
+        assert resp.features.speculative_decoding is False
+
+    def test_removed_nixl_env_is_null(self, monkeypatch):
+        import vllm
+
+        # `vllm.envs` that no longer defines the side channel port.
+        monkeypatch.setattr(vllm, "envs", SimpleNamespace(VLLM_NIXL_SIDE_CHANNEL_HOST="10.0.0.5"))
+        kv_transfer_cfg = _make_kv_transfer_config(kv_connector="NixlConnector")
+        resp = _build_response(_make_vllm_config(kv_transfer_config=kv_transfer_cfg), ["m"])
+        assert resp.kv_transfer.nixl_side_channel_port is None
+        assert resp.kv_transfer.nixl_side_channel_host == "10.0.0.5"
+
+    def test_non_dict_extra_config_becomes_empty(self):
+        kv_transfer_cfg = _make_kv_transfer_config()
+        kv_transfer_cfg.kv_connector_extra_config = "not a dict"
+        resp = _build_response(_make_vllm_config(kv_transfer_config=kv_transfer_cfg), ["m"])
+        assert resp.kv_transfer.extra_config == {}
+
+    def test_served_model_name_missing_everywhere(self):
+        cfg = _make_vllm_config()
+        del cfg.model_config.served_model_name
+        app = FastAPI()
+        plugin = ServerConfigPlugin()
+        plugin.attach_router(app)
+        app.state.vllm_config = cfg
+        # `args` without `served_model_name` at all.
+        asyncio.run(plugin.init_state(None, app.state, Namespace()))
+        with TestClient(app) as client:
+            data = client.get("/plugins/llm-d-server-introspection/config").json()
+        assert data["model"]["name"] is None
+        assert data["model"]["served_names"] == []
+
+    def test_served_model_name_as_plain_string(self):
+        app = _make_test_app(_make_vllm_config(), served_model_name="solo")
+        assert app.state.server_config_response.model.served_names == ["solo"]
+
+    def test_missing_vllm_config_serves_nulls(self):
+        app = FastAPI()
+        plugin = ServerConfigPlugin()
+        plugin.attach_router(app)
+        asyncio.run(plugin.init_state(None, app.state, Namespace(served_model_name=["m"])))
+        with TestClient(app) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/config")
+        assert resp.status_code == 200
+        assert resp.json()["model"] == {
+            "name": "m",
+            "served_names": ["m"],
+            "dtype": None,
+            "quantization": None,
+            "max_model_len": None,
+        }
+
+    def test_unexpected_init_failure_returns_503_and_does_not_raise(self, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise RuntimeError("vLLM changed something unforeseen")
+
+        monkeypatch.setattr(config_plugin, "_build_response", _boom)
+        app = _make_test_app(_make_vllm_config(), served_model_name=["m"])
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/plugins/llm-d-server-introspection/config")
+        assert resp.status_code == 503
+        assert "RuntimeError" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

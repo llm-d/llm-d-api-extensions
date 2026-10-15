@@ -16,7 +16,7 @@ Enable with:
 
 from typing import Any
 
-from .common import get_logger
+from .common import get_logger, read_attr
 
 logger = get_logger(__name__)
 
@@ -25,10 +25,13 @@ logger = get_logger(__name__)
 GET_DEVICE_PROPERTIES = "get_device_properties"
 
 
-def _safe(fn: Any, *args: Any) -> Any:
+def _safe(platform: Any, method: str, *args: Any) -> Any:
     # Some platforms (e.g. CPU) don't implement every `current_platform`
-    # device introspection method, Set to `None` instead of failing the
-    # whole `collective_rpc` call for every rank.
+    # device introspection method, and vLLM may rename or drop one. Set to
+    # `None` instead of failing the whole `collective_rpc` call for every rank.
+    fn = read_attr(platform, method)
+    if fn is None:
+        return None
     try:
         return fn(*args)
     except NotImplementedError:
@@ -39,18 +42,22 @@ class DeviceInfoWorkerExtension:
     def get_device_properties(self) -> dict:
         from vllm.platforms import current_platform
 
-        device_id = self.local_rank
-        capability = _safe(current_platform.get_device_capability, device_id)
+        rank = read_attr(self, "rank")
+        device_id = read_attr(self, "local_rank", 0)
+        capability = _safe(current_platform, "get_device_capability", device_id)
         properties = {
-            "rank": self.rank,
-            "name": _safe(current_platform.get_device_name, device_id),
-            "total_memory_bytes": _safe(current_platform.get_device_total_memory, device_id),
+            "rank": rank,
+            "name": _safe(current_platform, "get_device_name", device_id),
+            "total_memory_bytes": _safe(current_platform, "get_device_total_memory", device_id),
             "compute_capability": (
-                {"major": capability.major, "minor": capability.minor}
+                {
+                    "major": read_attr(capability, "major"),
+                    "minor": read_attr(capability, "minor"),
+                }
                 if capability is not None
                 else None
             ),
-            "num_compute_units": _safe(current_platform.num_compute_units, device_id),
+            "num_compute_units": _safe(current_platform, "num_compute_units", device_id),
         }
-        logger.info("device_worker_ext: rank=%d name=%s", self.rank, properties["name"])
+        logger.info("device_worker_ext: rank=%s name=%s", rank, properties["name"])
         return properties
