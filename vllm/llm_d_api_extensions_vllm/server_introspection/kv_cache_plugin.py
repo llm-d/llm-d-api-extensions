@@ -6,7 +6,15 @@ fields (`kv_cache_size_tokens`, `max_concurrency`, `num_gpu_blocks`,
 `num_cpu_blocks`) are read directly off `vllm_config.cache_config` &
 `model_config` which are already post profiling values by the time
 `init_state` runs (`EngineCore` mutates the shared config in place during
-`_initialize_kv_caches`).
+`_initialize_kv_caches`, and the engine ready handshake copies them onto the
+frontend's config).
+
+`kv_cache_size_tokens` and `max_concurrency` are the group aware values vLLM
+itself logs and exports (`cache_config.kv_cache_size_tokens` /
+`kv_cache_max_concurrency`). `num_gpu_blocks * block_size` is only used when
+vLLM did not resolve them, since it overstates capacity for models whose
+requests hold blocks in more than one KV cache group (sliding window, mamba
+and other hybrid models).
 
 `groups` is sourced separately from `engine_client.get_kv_cache_group_metadata()`
 once at startup and cached for the server's lifetime (immutable once
@@ -125,17 +133,26 @@ def _capacity_from_vllm_config(vllm_config: "VllmConfig | None") -> dict:
     cache_cfg = read_attr(vllm_config, "cache_config")
     num_gpu_blocks = read_attr(cache_cfg, "num_gpu_blocks")
     block_size = read_attr(cache_cfg, "block_size")
-    kv_cache_size_tokens = (
-        num_gpu_blocks * block_size
-        if _is_number(num_gpu_blocks) and _is_number(block_size)
-        else None
-    )
     max_model_len = read_attr(read_attr(vllm_config, "model_config"), "max_model_len")
-    max_concurrency = (
-        kv_cache_size_tokens / max_model_len
-        if kv_cache_size_tokens is not None and _is_number(max_model_len) and max_model_len
-        else None
-    )
+
+    # vLLM's own group aware capacity: a request at `max_model_len` takes
+    # blocks from every KV cache group, so `num_gpu_blocks * block_size`
+    # overstates it whenever there is more than one group.
+    kv_cache_size_tokens = read_attr(cache_cfg, "kv_cache_size_tokens")
+    max_concurrency = read_attr(cache_cfg, "kv_cache_max_concurrency")
+    if not _is_number(kv_cache_size_tokens) or not _is_number(max_concurrency):
+        # Not resolved (no engine handshake yet, or an older vLLM), so derive
+        # both from the block pool, which is exact for single group models.
+        kv_cache_size_tokens = (
+            num_gpu_blocks * block_size
+            if _is_number(num_gpu_blocks) and _is_number(block_size)
+            else None
+        )
+        max_concurrency = (
+            kv_cache_size_tokens / max_model_len
+            if kv_cache_size_tokens is not None and _is_number(max_model_len) and max_model_len
+            else None
+        )
     return {
         "kv_cache_size_tokens": kv_cache_size_tokens,
         "max_concurrency": max_concurrency,

@@ -85,11 +85,15 @@ def _make_vllm_config(
     block_size: int | None = 16,
     num_cpu_blocks: int | None = 0,
     max_model_len: int = 4096,
+    kv_cache_size_tokens: Any = None,
+    kv_cache_max_concurrency: Any = None,
 ) -> SimpleNamespace:
     cache_cfg = SimpleNamespace()
     cache_cfg.num_gpu_blocks = num_gpu_blocks
     cache_cfg.block_size = block_size
     cache_cfg.num_cpu_blocks = num_cpu_blocks
+    cache_cfg.kv_cache_size_tokens = kv_cache_size_tokens
+    cache_cfg.kv_cache_max_concurrency = kv_cache_max_concurrency
 
     model_cfg = SimpleNamespace()
     model_cfg.max_model_len = max_model_len
@@ -239,6 +243,46 @@ class TestCapacityFromVllmConfig:
         cfg = _make_vllm_config(num_cpu_blocks=512)
         data = _capacity_from_vllm_config(cfg)
         assert data["num_cpu_blocks"] == 512
+
+    def test_prefers_vllm_group_aware_capacity(self):
+        # Two groups (e.g. full + sliding window attention) sharing one block
+        # pool: a 4096 token request takes, say, 256 + 72 blocks, so vLLM resolves
+        # 1024 / 328 requests rather than the 1024 * 16 / 4096 the pool implies.
+        cfg = _make_vllm_config(
+            num_gpu_blocks=1024,
+            block_size=16,
+            max_model_len=4096,
+            kv_cache_size_tokens=12787,
+            kv_cache_max_concurrency=1024 / 328,
+        )
+        data = _capacity_from_vllm_config(cfg)
+        assert data["kv_cache_size_tokens"] == 12787
+        assert data["max_concurrency"] == pytest.approx(1024 / 328)
+        assert data["num_gpu_blocks"] == 1024
+        assert not drift_events()
+
+    def test_unresolved_group_aware_capacity_falls_back_to_block_pool(self):
+        cfg = _make_vllm_config(num_gpu_blocks=1024, block_size=16, max_model_len=4096)
+        data = _capacity_from_vllm_config(cfg)
+        assert data["kv_cache_size_tokens"] == 16384
+        assert data["max_concurrency"] == pytest.approx(4.0)
+        assert not drift_events()
+
+    def test_partially_resolved_group_aware_capacity_is_not_mixed(self):
+        cfg = _make_vllm_config(
+            num_gpu_blocks=1024, block_size=16, max_model_len=4096, kv_cache_size_tokens=12787
+        )
+        data = _capacity_from_vllm_config(cfg)
+        assert data["kv_cache_size_tokens"] == 16384
+        assert data["max_concurrency"] == pytest.approx(4.0)
+
+    def test_older_vllm_without_group_aware_capacity_falls_back(self):
+        cfg = _make_vllm_config(num_gpu_blocks=1024, block_size=16, max_model_len=4096)
+        del cfg.cache_config.kv_cache_size_tokens
+        del cfg.cache_config.kv_cache_max_concurrency
+        data = _capacity_from_vllm_config(cfg)
+        assert data["kv_cache_size_tokens"] == 16384
+        assert data["max_concurrency"] == pytest.approx(4.0)
 
 
 # ---------------------------------------------------------------------------
